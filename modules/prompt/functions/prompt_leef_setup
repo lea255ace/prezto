@@ -1,0 +1,152 @@
+#
+# A comprehensive, multiline theme that displays most information you would like to know at a glance.
+# Design heavily inspired by the 'adam2' theme, code heavily borrowed from the 'sorin' theme.
+#
+# Authors:
+#   Sorin Ionescu <sorin.ionescu@gmail.com>
+#   Mick Wollman <mick.wollman@gmail.com>
+#
+#
+
+function prompt_leef_parse_git_info {
+  # We can safely split on ':' because it isn't allowed in ref names.
+  IFS=':' read _git_target _git_action _git_dirty _git_staged _git_stashed _git_commits_ahead _git_commits_behind<<<"$3"
+
+  # The target actually contains 3 space separated possibilities, so we need to
+  # make sure we grab the first one.
+  _git_target=$(coalesce ${(@)${(z)_git_target}})
+
+  if [[ -z "$_git_target" ]]; then
+    # No git target detected, flush the git fragment and redisplay the prompt.
+    if [[ -n "$_prompt_leef_git_info" ]]; then
+      _prompt_leef_git_info=''
+      zle && zle reset-prompt
+    fi
+  else
+    # Git target detected, update the git fragment and redisplay the prompt.
+    _git_dirty=$(coalesce ${(@)${(z)_git_dirty}})
+
+    local placeholder_char='%F{7}.%f'
+    [[ -n "$_git_action" ]] && _git_action="%F{7}:%f${_git_action}"
+    [[ -z "$_git_dirty" ]] && _git_dirty="${placeholder_char}"
+    [[ -z "$_git_staged" ]] && _git_staged="${placeholder_char}"
+    [[ -z "$_git_stashed" ]] && _git_stashed="${placeholder_char}"
+    [[ -z "$_git_commits_ahead" ]] && _git_commits_ahead='%F{7} -%f'
+    [[ -z "$_git_commits_behind" ]] && _git_commits_behind='%F{7} -%f'
+    _prompt_leef_git_info="${_git_target}${_git_action} ${_prompt_leef_padding_color}["
+    _prompt_leef_git_info+="${_git_dirty} ${_git_staged} ${_git_stashed} ${_git_commits_ahead}a ${_git_commits_behind}b"
+    _prompt_leef_git_info+="${_prompt_leef_padding_color}]"
+    zle && zle reset-prompt
+  fi
+}
+
+function prompt_leef_async_git_info {
+  cd -q "$1"
+  if (( $+functions[git-info] )); then
+    git-info
+    print ${git_info[status]}
+  fi
+}
+
+function prompt_leef_precmd {
+  # Length eval needs to come first, as any function call will mask the return code length.
+  local prompt_line_1_right_width=${#${(S%%)_prompt_leef_line_1_right//(\%[KF]\{*\}|\%[Bbkf])}}
+  # The prompt will eat previous output if the first line is exactly COLUMNS in length.
+  _prompt_leef_line_1_padding_width=$(( COLUMNS - _prompt_leef_line_1_left_width - prompt_line_1_right_width - 1))
+
+  _prompt_leef_pwd=$(prompt-pwd)
+
+  # Kill the old process of slow commands if it is still running.
+  async_flush_jobs async_leef_git_info
+
+  # Handle updating git data. We also clear the git prompt data if we're in a
+  # different git root now.
+  if (( $+functions[git-dir] )); then
+    local new_git_root="$(git-dir 2> /dev/null)"
+    if [[ $new_git_root != $_prompt_leef_cur_git_root ]]; then
+      _prompt_leef_git_info=''
+      _prompt_leef_cur_git_root=$new_git_root
+    fi
+  fi
+
+  # Compute slow commands in the background.
+  async_job async_leef_git_info prompt_leef_async_git_info "$PWD"
+}
+
+function prompt_leef_setup {
+  prompt_opts=( percent sp subst)
+
+  autoload -Uz add-zsh-hook
+  autoload -Uz async && async
+
+  add-zsh-hook precmd prompt_leef_precmd
+
+  _prompt_leef_padding_color='%F{8}'
+
+  local error_code="%(?,,${_prompt_leef_padding_color}[%F{9}%?${_prompt_leef_padding_color}])"
+  local user_host_name='%F{13}%n%F{15}@%F{14}%m%f'
+
+  # Set editor-info parameters.
+  zstyle ':prezto:module:editor:info:completing' format '%B%F{7}...%f%b'
+  zstyle ':prezto:module:editor:info:keymap:primary' format "${_prompt_leef_padding_color}------%f"
+  zstyle ':prezto:module:editor:info:keymap:alternate' format  \
+                            "${_prompt_leef_padding_color}[%F{11}NORM${_prompt_leef_padding_color}]%f%b"
+
+  local git_dirty_char='%F{13}!%f'
+  zstyle ':prezto:module:git:info' verbose 'yes'
+  zstyle ':prezto:module:git:info:action' format '%F{9}%s%f'
+  zstyle ':prezto:module:git:info:added' format '%F{2}+%f'
+  zstyle ':prezto:module:git:info:ahead' format '%F{10}%-2A%f'
+  zstyle ':prezto:module:git:info:behind' format '%F{14}%-2B%f'
+  zstyle ':prezto:module:git:info:branch' format '%F{10}%b%f'
+  zstyle ':prezto:module:git:info:commit' format '%F{7}%.7c%f'
+  zstyle ':prezto:module:git:info:deleted' format "${git_dirty_char}"
+  zstyle ':prezto:module:git:info:modified' format "${git_dirty_char}"
+  zstyle ':prezto:module:git:info:position' format '%F{13}%p%f'
+  zstyle ':prezto:module:git:info:renamed' format "${git_dirty_char}"
+  zstyle ':prezto:module:git:info:stashed' format '%F{12}*%f'
+  # This format is closely coupled with the parsing code in prompt_leef_parse_git_info()
+  zstyle ':prezto:module:git:info:keys' format \
+    'status' '%b %p %c:%s:%m %d %r:%a:%S:%A:%B'
+
+  async_start_worker async_leef_git_info -n
+  async_register_callback async_leef_git_info prompt_leef_parse_git_info
+
+  _prompt_leef_cur_git_root=''
+  _prompt_leef_git_info=''
+  _prompt_leef_pwd=''
+
+  _prompt_leef_line_1_left="%F{11}+${_prompt_leef_padding_color}----%b"
+  _prompt_leef_line_1_left+='${editor_info[keymap]}'
+  _prompt_leef_line_1_left_width=11
+
+  _prompt_leef_line_1_right="${error_code}${_prompt_leef_padding_color}-[%F{11}%w %D{%T}${_prompt_leef_padding_color}]->"
+
+  local prompt_line_1_padding_chars='${(l:${_prompt_leef_line_1_padding_width}::-:)_empty_zz}'
+  local prompt_line_1_padding="${_prompt_leef_padding_color}${prompt_line_1_padding_chars}%f%b"
+
+  local literal_grave='\`'
+  local prompt_line_2="%F{11}${literal_grave}${_prompt_leef_padding_color}--> %b"
+  [[ "${SSH_CONNECTION}" != '' ]] && prompt_line_2+="${user_host_name} "
+  prompt_line_2+='%F{blue}${_prompt_leef_pwd}%f %(!.#.%(?,$,%F{red}$%f)) '
+
+  PS1="${_prompt_leef_line_1_left}${prompt_line_1_padding}${_prompt_leef_line_1_right}${prompt_newline}"
+  PS1+="${prompt_line_2}"
+  RPS1='${_prompt_leef_git_info}'
+}
+
+function prompt_leef_preview {
+  local +h PROMPT=''
+  local +h RPROMPT=''
+  local +h SPROMPT=''
+
+  editor-info 2> /dev/null
+  print "Sadly the leef theme inherits parse errors from the adam2 theme."
+  print "I suggest you try it out, it should look like this but with prettier colors:"
+  print ".--[VI MODE]-------------------------------------------[\$?]--[TIME]->"
+  print "\`--> [USER@HOST (if ssh'd)] ~/path $               [various git info]"
+  print ""
+  prompt_preview_theme 'leef'
+}
+
+prompt_leef_setup "$@"
