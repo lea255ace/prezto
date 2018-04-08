@@ -132,7 +132,7 @@ function prompt_leef_setup {
 
   PS1="${_prompt_leef_line_1_left}${prompt_line_1_padding}${_prompt_leef_line_1_right}${prompt_newline}"
   PS1+="${prompt_line_2}"
-  RPS1='${_prompt_leef_git_info}'
+  RPS1='${_prompt_leef_git_info}  '
 }
 
 function prompt_leef_preview {
@@ -144,7 +144,7 @@ function prompt_leef_preview {
   print "Sadly the leef theme inherits parse errors from the adam2 theme."
   print "I suggest you try it out, it should look like this but with prettier colors:"
   print ".--[VI MODE]-------------------------------------------[\$?]--[TIME]->"
-  print "\`--> [USER@HOST (if ssh'd)] ~/path $               [various git info]"
+  print "\`--> [USER@HOST (if ssh'd)] ~/path $             [various git info]  "
   print ""
   prompt_preview_theme 'leef'
 }
